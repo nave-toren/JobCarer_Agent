@@ -1,4 +1,5 @@
 import asyncio
+import ssl
 from playwright.async_api import async_playwright
 import database
 import smtplib
@@ -96,6 +97,82 @@ async def send_email(to_email, user_interests, jobs_list, is_first_email=False):
     except Exception as e:
         print(f"❌ Email failed to {to_email}: {e}")
 
+
+
+
+async def send_email(to_email, user_interests, jobs_list, is_first_email=False):
+    """ שולח מייל עם רשימת המשרות - גרסה משולבת (עיצוב + תיקון SSL) """
+    
+    # 1. סינון לפי קטגוריות (שמרנו מהקוד המקורי שלך)
+    if not jobs_list:
+        return False
+
+    user_interest_list = user_interests.split(',') if user_interests else []
+    relevant_jobs = []
+
+    # אם זה המייל הראשון - שולחים הכל. אם לא - מסננים לפי תחומי עניין.
+    if is_first_email:
+        relevant_jobs = jobs_list
+    else:
+        for job in jobs_list:
+            # נניח ש-classify_job מוגדרת אצלך בקובץ
+            cat = classify_job(job['title']) 
+            if not user_interest_list or user_interest_list == [''] or cat in user_interest_list:
+                relevant_jobs.append(job)
+            
+    if not relevant_jobs:
+        print(f"   ℹ️ No relevant jobs for {to_email} after filtering.")
+        return False
+
+    # 2. בניית המייל והעיצוב (שמרנו את העיצוב היפה שלך)
+    sender_email = os.getenv("EMAIL_ADDRESS")
+    password = os.getenv("EMAIL_PASSWORD")
+    
+    if not sender_email or not password:
+        print("❌ Email credentials missing!")
+        return False
+
+    msg = MIMEMultipart()
+    msg['From'] = sender_email
+    msg['To'] = to_email
+    
+    title_text = "👋 Welcome! Here are ALL open positions for you" if is_first_email else "🚀 New Jobs Found!"
+    msg['Subject'] = f"{title_text} ({len(relevant_jobs)})"
+
+    # גוף המייל המעוצב
+    html_body = f"""
+    <div style="font-family: Arial, sans-serif; direction: ltr;">
+        <h2>{title_text}</h2>
+        <p>We found {len(relevant_jobs)} jobs matching your interests: <b>{user_interests}</b></p>
+        <ul style='padding: 0; list-style-type: none;'>
+    """
+    
+    for job in relevant_jobs:
+        html_body += f"""
+        <li style="margin-bottom: 12px; padding: 10px; border-left: 4px solid #ff7e5f; background: #f9f9f9; border-radius: 4px;">
+            <a href='{job['link']}' style='font-weight: bold; text-decoration: none; color: #0984e3; font-size: 16px;'>{job['title']}</a>
+            <div style="font-size: 13px; color: #555; margin-top: 4px;">🏢 <strong>{job['company']}</strong></div>
+        </li>
+        """
+    html_body += "</ul><p>Good luck! <br> Job Hunter Bot 🤖</p></div>"
+    
+    msg.attach(MIMEText(html_body, 'html'))
+
+    # 3. החלק החדש והקריטי - שליחה דרך SSL (פותר את ה-Network Unreachable)
+    try:
+        context = ssl.create_default_context()
+        # שימוש בפורט 465 המאובטח
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=context) as server:
+            server.login(sender_email, password)
+            server.sendmail(sender_email, to_email, msg.as_string())
+        
+        print(f"✅ Email sent successfully to {to_email}")
+        return True
+
+    except Exception as e:
+        print(f"❌ Email failed to {to_email}: {e}")
+        return False
+
 async def scrape_company(page, company_row):
     """ סורק חברה ומחזיר את כל המשרות שנמצאו בה כרגע - גרסה עמידה לקריסות """
     url = company_row['careers_url']
@@ -108,35 +185,32 @@ async def scrape_company(page, company_row):
     try:
         print(f"   ⏳ Navigating to {url}...")
         
-        # --- התיקון הקריטי ---
-        # 1. לא מחכים ל-load מלא (שנתקע), אלא רק לטקסט ראשוני (domcontentloaded)
-        # 2. הורדנו את ה-Timeout ל-60 שניות כדי לא להיתקע לנצח
+        # 1. לא מחכים ל-load מלא, אלא רק לטקסט ראשוני
         await page.goto(url, timeout=60000, wait_until='domcontentloaded')
         
-        # 3. גלילה הדרגתית (במקום קפיצה אחת) כדי להעיר את האתר ולטעון משרות
+        # 2. גלילה הדרגתית כדי להעיר את האתר
         for _ in range(3): 
             await page.keyboard.press("PageDown")
-            await asyncio.sleep(1) # נותן לאתר שנייה לטעון תוכן חדש
+            await asyncio.sleep(1) 
             
-        # 4. המתנה קצרה אחרונה ליתר ביטחון שה-JavaScript סיים לצייר
+        # 3. המתנה קצרה אחרונה
         print("   💤 Waiting for content to render...")
         await asyncio.sleep(3)
-        # ---------------------
 
         links = await page.query_selector_all('a')
-        seen_links = set() # למניעת כפילויות באותו עמוד
+        seen_links = set()
 
         for link in links:
             try:
-                # שימוש ב-safe access למקרה שהאלמנט נעלם פתאום
                 txt = await link.inner_text()
                 href = await link.get_attribute('href')
                 
                 if txt and href and len(txt) > 3:
                     txt_lower = txt.lower()
-                    if any(junk in txt_lower for junk in JUNK_KEYWORDS): continue
+                    # (הנחתי שיש לך משתנה גלובלי JUNK_KEYWORDS מוגדר למעלה)
+                    # אם לא, תמחק את השורה הבאה או תוסיף: JUNK_KEYWORDS = ['login', 'privacy', 'terms']
+                    if 'JUNK_KEYWORDS' in globals() and any(junk in txt_lower for junk in JUNK_KEYWORDS): continue
                     
-                    # בניית לינק מלא
                     full_link = href if href.startswith('http') else url.rstrip('/') + href
                     
                     if full_link not in seen_links:
@@ -148,14 +222,14 @@ async def scrape_company(page, company_row):
                             'link': full_link
                         })
             except:
-                continue # אם לינק ספציפי עושה בעיות, מדלגים עליו וממשיכים
+                continue 
                 
     except Exception as e:
         print(f"❌ Error scanning {name}: {e}")
         
     print(f"   ✅ Found {len(found_jobs)} jobs at {name}")
     return found_jobs
-    
+
 async def run_scraper_engine():
     print("🚀 Starting Smart Scraper...")
     
