@@ -1,23 +1,17 @@
 import asyncio
-import ssl
-from playwright.async_api import async_playwright
-import database
+import os
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-import os
 from dotenv import load_dotenv
+from playwright.async_api import async_playwright
+import database
 
+# טעינת משתני סביבה
 load_dotenv()
 
-# הגדרות SMTP
-SMTP_SERVER = "smtp.gmail.com"
-SMTP_PORT = 587
-SENDER_EMAIL = os.getenv("EMAIL_USER")
-SENDER_PASSWORD = os.getenv("EMAIL_PASSWORD")
-DISPLAY_NAME = "Job Hunter Bot 🤖"
+# --- הגדרות וקבועים ---
 
-# מילות מפתח לסינון קטגוריות
 CATEGORY_KEYWORDS = {
     "Engineering": ['engineer', 'developer', 'r&d', 'data', 'algorithm', 'architect', 'full stack', 'backend', 'frontend', 'mobile', 'devops', 'software', 'qa', 'cyber'],
     "Product": ['product', 'design', 'ux', 'ui', 'creative', 'head of product'],
@@ -33,89 +27,29 @@ JUNK_KEYWORDS = [
 ]
 
 def classify_job(title):
+    """ מסווג משרה לקטגוריה לפי הכותרת """
     title_lower = title.lower()
     for category, keywords in CATEGORY_KEYWORDS.items():
         if any(k in title_lower for k in keywords):
             return category
     return "Other"
 
+# --- פונקציית המייל (MVP - פשוט ונקי) ---
 async def send_email(to_email, user_interests, jobs_list, is_first_email=False):
-    """ שולח מייל עם רשימת המשרות שנמצאו עבור המשתמש """
-    if not jobs_list:
-        return
-
-    # סינון לפי קטגוריות שהמשתמש בחר
-    user_interest_list = user_interests.split(',') if user_interests else []
-    relevant_jobs = []
-
-    for job in jobs_list:
-        cat = classify_job(job['title'])
-        # אם המשתמש לא בחר כלום, או שהקטגוריה ברשימה שלו
-        if not user_interest_list or user_interest_list == [''] or cat in user_interest_list:
-            relevant_jobs.append(job)
-            
-    if not relevant_jobs:
-        return
-
-    # כותרת המייל
-    title_text = "👋 Welcome! Here are ALL open positions for you" if is_first_email else "🚀 New Jobs Found!"
+    """ שולח מייל בשיטה הסטנדרטית (Port 587) """
     
-    # בניית גוף המייל
-    jobs_html = "<ul style='padding: 0; list-style-type: none;'>"
-    for job in relevant_jobs:
-        jobs_html += f"""
-        <li style="margin-bottom: 12px; padding: 10px; border-left: 4px solid #ff7e5f; background: #f9f9f9; border-radius: 4px;">
-            <a href='{job['link']}' style='font-weight: bold; text-decoration: none; color: #0984e3; font-size: 16px;'>{job['title']}</a>
-            <div style="font-size: 13px; color: #555; margin-top: 4px;">🏢 <strong>{job['company']}</strong></div>
-        </li>
-        """
-    jobs_html += "</ul>"
-
-    body = f"""
-    <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 20px; max-width: 600px; margin: auto; border: 1px solid #eee; border-radius: 8px;">
-        <h2 style="color: #2d3436; text-align: center;">{title_text}</h2>
-        <p style="text-align: center; color: #666;">Showing {len(relevant_jobs)} jobs matching your interests.</p>
-        <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;">
-        {jobs_html}
-        <p style="font-size: 12px; color: #999; margin-top: 30px; text-align: center;">Job Hunter Bot 🤖 | Built by Nave Toren</p>
-    </div>
-    """
-
-    msg = MIMEMultipart()
-    msg['From'] = f"{DISPLAY_NAME} <{SENDER_EMAIL}>"
-    msg['To'] = to_email
-    msg['Subject'] = f"🎯 {len(relevant_jobs)} Opportunities found for you!"
-    msg.attach(MIMEText(body, 'html'))
-
-    try:
-        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
-        server.starttls()
-        server.login(SENDER_EMAIL, SENDER_PASSWORD)
-        server.sendmail(SENDER_EMAIL, to_email, msg.as_string())
-        server.quit()
-        print(f"📧 Sent email to {to_email}")
-    except Exception as e:
-        print(f"❌ Email failed to {to_email}: {e}")
-
-
-
-
-async def send_email(to_email, user_interests, jobs_list, is_first_email=False):
-    """ שולח מייל עם רשימת המשרות - גרסה משולבת (עיצוב + תיקון SSL) """
-    
-    # 1. סינון לפי קטגוריות (שמרנו מהקוד המקורי שלך)
+    # 1. בדיקה שיש תוכן לשלוח
     if not jobs_list:
         return False
 
+    # 2. סינון משרות לפי תחומי עניין
     user_interest_list = user_interests.split(',') if user_interests else []
     relevant_jobs = []
 
-    # אם זה המייל הראשון - שולחים הכל. אם לא - מסננים לפי תחומי עניין.
     if is_first_email:
-        relevant_jobs = jobs_list
+        relevant_jobs = jobs_list # במייל הראשון שולחים הכל
     else:
         for job in jobs_list:
-            # נניח ש-classify_job מוגדרת אצלך בקובץ
             cat = classify_job(job['title']) 
             if not user_interest_list or user_interest_list == [''] or cat in user_interest_list:
                 relevant_jobs.append(job)
@@ -124,14 +58,15 @@ async def send_email(to_email, user_interests, jobs_list, is_first_email=False):
         print(f"   ℹ️ No relevant jobs for {to_email} after filtering.")
         return False
 
-    # 2. בניית המייל והעיצוב (שמרנו את העיצוב היפה שלך)
-    sender_email = os.getenv("EMAIL_ADDRESS")
+    # 3. התחברות לשרת המייל
+    sender_email = os.getenv("EMAIL_ADDRESS") or os.getenv("EMAIL_USER")
     password = os.getenv("EMAIL_PASSWORD")
     
     if not sender_email or not password:
-        print("❌ Email credentials missing!")
+        print("❌ Error: Email credentials missing in environment variables.")
         return False
 
+    # 4. בניית ההודעה
     msg = MIMEMultipart()
     msg['From'] = sender_email
     msg['To'] = to_email
@@ -139,7 +74,6 @@ async def send_email(to_email, user_interests, jobs_list, is_first_email=False):
     title_text = "👋 Welcome! Here are ALL open positions for you" if is_first_email else "🚀 New Jobs Found!"
     msg['Subject'] = f"{title_text} ({len(relevant_jobs)})"
 
-    # גוף המייל המעוצב
     html_body = f"""
     <div style="font-family: Arial, sans-serif; direction: ltr;">
         <h2>{title_text}</h2>
@@ -158,23 +92,25 @@ async def send_email(to_email, user_interests, jobs_list, is_first_email=False):
     
     msg.attach(MIMEText(html_body, 'html'))
 
-    # 3. החלק החדש והקריטי - שליחה דרך SSL (פותר את ה-Network Unreachable)
+    # 5. שליחה (Port 587 Standard)
     try:
-        context = ssl.create_default_context()
-        # שימוש בפורט 465 המאובטח
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=context) as server:
-            server.login(sender_email, password)
-            server.sendmail(sender_email, to_email, msg.as_string())
+        print(f"   🔌 Connecting to Gmail (Port 587)...")
+        server = smtplib.SMTP('smtp.gmail.com', 587)
+        server.starttls() # הצפנה
+        server.login(sender_email, password)
+        server.sendmail(sender_email, to_email, msg.as_string())
+        server.quit()
         
         print(f"✅ Email sent successfully to {to_email}")
         return True
 
     except Exception as e:
-        print(f"❌ Email failed to {to_email}: {e}")
+        print(f"❌ Failed to send email to {to_email}: {e}")
         return False
 
+# --- פונקציית הסריקה ---
 async def scrape_company(page, company_row):
-    """ סורק חברה ומחזיר את כל המשרות שנמצאו בה כרגע - גרסה עמידה לקריסות """
+    """ סורק חברה ומחזיר את כל המשרות שנמצאו בה כרגע """
     url = company_row['careers_url']
     name = company_row['name']
     c_id = company_row['id']
@@ -184,16 +120,14 @@ async def scrape_company(page, company_row):
 
     try:
         print(f"   ⏳ Navigating to {url}...")
-        
-        # 1. לא מחכים ל-load מלא, אלא רק לטקסט ראשוני
+        # שימוש ב-domcontentloaded למניעת תקיעות
         await page.goto(url, timeout=60000, wait_until='domcontentloaded')
         
-        # 2. גלילה הדרגתית כדי להעיר את האתר
+        # גלילה להעיר את האתר
         for _ in range(3): 
             await page.keyboard.press("PageDown")
             await asyncio.sleep(1) 
             
-        # 3. המתנה קצרה אחרונה
         print("   💤 Waiting for content to render...")
         await asyncio.sleep(3)
 
@@ -207,9 +141,7 @@ async def scrape_company(page, company_row):
                 
                 if txt and href and len(txt) > 3:
                     txt_lower = txt.lower()
-                    # (הנחתי שיש לך משתנה גלובלי JUNK_KEYWORDS מוגדר למעלה)
-                    # אם לא, תמחק את השורה הבאה או תוסיף: JUNK_KEYWORDS = ['login', 'privacy', 'terms']
-                    if 'JUNK_KEYWORDS' in globals() and any(junk in txt_lower for junk in JUNK_KEYWORDS): continue
+                    if any(junk in txt_lower for junk in JUNK_KEYWORDS): continue
                     
                     full_link = href if href.startswith('http') else url.rstrip('/') + href
                     
@@ -230,8 +162,9 @@ async def scrape_company(page, company_row):
     print(f"   ✅ Found {len(found_jobs)} jobs at {name}")
     return found_jobs
 
+# --- המנוע הראשי ---
 async def run_scraper_engine():
-    print("🚀 Starting Smart Scraper...")
+    print("🚀 Starting Smart Scraper MVP...")
     
     companies = database.get_all_companies_for_scan()
     users = database.get_users()
@@ -240,22 +173,18 @@ async def run_scraper_engine():
         print("😴 No companies to scan.")
         return
 
-    # מילון לאחסון כל המשרות החיות שנמצאו בסריקה הזו
     jobs_by_company = {}
-    
-    # סט לשמירת לינקים שהם חדשים גלובלית
     globally_new_links = set()
 
-    # --- שלב 1: איסוף כל המשרות מהשטח ---
+    # שלב 1: סריקה
     async with async_playwright() as p:
-        # === כאן השינוי הגדול: מצב חיסכון בזיכרון ===
-        print("   🔨 Launching Browser in low-memory mode...")
+        print("   🔨 Launching Browser (Low Memory)...")
         browser = await p.chromium.launch(
             headless=True,
             args=[
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage', # מציל את הזיכרון!
+                '--disable-dev-shm-usage',
                 '--disable-accelerated-2d-canvas',
                 '--no-first-run',
                 '--no-zygote',
@@ -263,7 +192,6 @@ async def run_scraper_engine():
                 '--disable-gpu'
             ]
         )
-        print("   ✅ Browser launched successfully!")
         
         page = await browser.new_page()
         
@@ -272,7 +200,6 @@ async def run_scraper_engine():
             jobs = await scrape_company(page, company)
             jobs_by_company[c_id] = jobs
             
-            # בדיקה האם המשרות חדשות ב-DB
             for job in jobs:
                 if not database.job_exists(job['link']):
                     database.add_job(c_id, job['title'], job['link'])
@@ -280,7 +207,7 @@ async def run_scraper_engine():
         
         await browser.close()
 
-    # --- שלב 2: הפצת מיילים מותאמת אישית ---
+    # שלב 2: שליחת מיילים
     print(f"\n📨 Processing emails for {len(users)} users...")
     
     for user in users:
@@ -304,11 +231,11 @@ async def run_scraper_engine():
                         jobs_to_send.append(job)
         
         if jobs_to_send:
-            await send_email(email, interests, jobs_to_send, is_first_email=is_new_user)
+            success = await send_email(email, interests, jobs_to_send, is_first_email=is_new_user)
             
-            if is_new_user:
+            if success and is_new_user:
                 database.mark_user_as_not_new(email)
-                print(f"✅ User {email} welcomed and marked as regular.")
+                print(f"✅ User {email} marked as regular.")
         else:
             print(f"🤷‍♂️ No relevant updates for {email}")
 
