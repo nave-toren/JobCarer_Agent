@@ -1,93 +1,55 @@
-🎯 Career Agent — Smart Job Monitoring System
-An autonomous Career Agent that tracks company career pages, detects new job openings, and sends personalized email alerts based on user-selected departments.
-Built to scale efficiently with multiple users and companies.
+# Career Agent — Job Monitoring System
 
-🚀 How It Works (Architecture)
-The system is built around a company-first scanning strategy:
- Scan each company only once per run 🔍
-Career pages are scraped and all open roles are collected.
- Jobs are cached and compared to previous runs 🧠
-Only new job postings are considered for alerts.
- Personalized filtering per user 👤
+An automated agent that tracks company career pages, detects new job openings, and sends personalized email alerts based on each user's selected departments and region.
 
-Each user receives only jobs that match:
-The companies they follow
-The departments they selected (Engineering, Product, Support, etc.)
-This design allows:
+## How It Works
 
-Multiple users to follow the same company
-One scrape → many personalized alerts
-Minimal website load and faster execution
+1. **Users subscribe** with their email, choose departments (Engineering, Product, Marketing, etc.) and a region preference (Israel only / global), and add up to 5 company career pages to follow.
+2. **The scanner runs** on a schedule (cron-triggered endpoint) or right after a new subscription.
+3. **Each tracked career page is scraped** with a headless browser (Playwright), and candidate job links are extracted from the page and its iframes.
+4. **New jobs are detected** by comparing against a job cache in PostgreSQL. Only postings that weren't seen before trigger alerts.
+5. **Each user receives a personalized email** with only the new jobs that match their companies, departments and region.
+   New users receive the full current list on their first run.
 
+## Job Detection
 
- Smart Scraping (Site-Aware) 🕵️‍♂️
-The agent automatically detects which hiring platform a company uses and applies a dedicated scraper:
-🟢 Greenhouse
-🟣 Lever
-🟡 Generic fallback for custom career pages
-This improves accuracy and avoids collecting irrelevant links like:
-privacy policies, blog posts, login pages, etc.
-For companies without known platforms, a keyword-based fallback scraper is used
+Career pages differ widely in structure, so the scraper uses a generic, keyword-based approach:
 
+- Collects all links on the page, including links inside embedded iframes (where many hiring widgets live).
+- Keeps links whose text contains job-title keywords (engineer, developer, analyst, etc.) or whose URL looks like a job posting (`/job`, `/career`, `/apply`, `lever.co`, `greenhouse.io`, ...).
+- Filters out noise such as privacy policies, login pages, blog posts and social links.
+- Tags jobs as Israel-based when the title or URL mentions an Israeli location.
 
-Job Classification & Filtering 🎯 
-Each job is classified by department using keyword-based NLP-style matching on:
-Job title
-(optionally extendable to URL / page structure)
-Supported categories:
-Engineering
-Product
-Marketing
-Finance
-HR / Operations
-Support
-Only jobs matching the user's selected departments are sent by email.
+## Classification
 
+Each job title is classified into a department using keyword matching:
+Engineering, Product, Marketing, Finance, HR / Operations, Support.
+Only jobs in the user's selected departments are included in their email.
 
-Email Delivery 📬
-Alerts are sent using Resend Email API:
-No SMTP servers
-Reliable cloud delivery
-Scales easily for production use
-Each email contains:
-Only newly discovered jobs
-Clean HTML formatting
-Personalized job lists
+## Email Delivery
 
+Alerts are sent through the Resend Email API as HTML emails, grouped by department.
 
-Cloud-Ready ☁️ 
-Deployed on Render with:
-Background task execution
-External PostgreSQL (Neon) database
-Cron-ready endpoint for scheduled scans
-Designed for:
-Fully automated daily scanning
-No manual triggers required
+## Deployment
 
+- Hosted on Render
+- PostgreSQL on Neon
+- `/trigger-scan` endpoint for scheduled (cron) runs
+- Scans run as background tasks so requests return immediately
 
-Tech Stack 🧱
-Backend
-FastAPI
-Async Playwright
-Scraping
-Site-aware Playwright scrapers
-Generic keyword-based fallback crawler
-Database
-PostgreSQL (Neon)
-Job cache for detecting new postings
-Email
-Resend API
-Frontend
-Jinja2 templates
+## Tech Stack
 
+- **Backend:** FastAPI, Jinja2 templates
+- **Scraping:** Async Playwright (Chromium, headless)
+- **Database:** PostgreSQL (Neon), psycopg2
+- **Email:** Resend API
 
-Why This Is Different 🎯 
-Unlike simple scrapers that:
-scrape per user
-send duplicate traffic
-lack filtering
-This system:
-Scrapes per company
-Distributes results intelligently
-Scales with users
-Mimics real-world job alert platforms
+## Roadmap
+
+- Dedicated integrations for Greenhouse and Lever using their public job-board APIs, instead of scraping
+- Scan each unique company once and share results across all users following it
+- Unit and regression tests for job filtering and classification, with CI on every pull request
+- Whole-word keyword matching to reduce misclassification
+- Concurrent scanning of multiple companies
+- Authentication for user actions and the scan trigger endpoint
+- Monitoring that flags a company whose scan suddenly returns zero jobs (likely a broken scraper)
